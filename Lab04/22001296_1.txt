@@ -1,0 +1,110 @@
+//Abdullah Riaz
+//22001296
+
+//4:1 mux
+module mux41(
+input logic s1,s0,d0,d1,d2,d3,
+output logic y
+);
+   assign y = s1 ? (s0 ? d0 : d1) : (s0 ? d2 : d3);
+    
+endmodule
+
+//SystemVerilog module for synchronously resettable D flip-flop
+
+module resetable_flipflop(input logic clk,
+input logic reset,
+input logic d,
+output logic q);
+always_ff@(posedge clk)
+if (reset) q<=0;
+else q<=d;
+endmodule
+
+
+//MultiFuntion Register
+
+module multifunc_register(
+    input logic clk,
+    input logic reset,
+    input logic [3:0] i,
+    input logic [1:0] s,
+    input logic shl_in,
+    input logic shr_in,
+    output logic [3:0] q
+);
+    logic [3:0] temp;
+
+
+mux41 mux1 (s[1],s[0],shl_in,q[1],i[0],q[0],temp[0]);
+mux41 mux2 (s[1],s[0],q[0],q[2],i[1],q[1],temp[1]);
+mux41 mux3 (s[1],s[0],q[1],q[3],i[2],q[2],temp[2]);
+mux41 mux4 (s[1],s[0],q[2],shr_in,i[3],q[3],temp[3]);
+
+resetable_flipflop flop1 (clk,reset,temp[0],q[0]);
+resetable_flipflop flop2 (clk,reset,temp[1],q[1]);
+resetable_flipflop flop3 (clk,reset,temp[2],q[2]);
+resetable_flipflop flop4 (clk,reset,temp[3],q[3]);
+
+
+endmodule
+
+
+//Testbench
+module multi_func_tb();
+    logic clk,reset;
+    logic [3:0] i;
+    logic [1:0] s;
+    logic shl_in;
+    logic shr_in;
+    logic [3:0] q;
+
+
+    multifunc_register dut(clk, reset, i[3:0], s[1:0], shl_in, shr_in, q[3:0]);
+
+    //generate clock
+    always #5 clk = ~clk;
+
+
+    initial
+        begin
+            clk = 0;
+            reset = 1;
+            shl_in = 0;
+            shr_in = 0;
+            
+            #10;
+            reset = 0;
+            
+            s=2'b00;
+            i= 4'b0000; #10;
+            i= 4'b0001; #10;
+            i= 4'b0010; #10;
+            i= 4'b0011; #10;
+            i= 4'b0100; #10;
+            
+            s=2'b01;
+            i= 4'b0000; #10;
+            i= 4'b0001; #10;
+            i= 4'b0010; #10;
+            i= 4'b0100; #10;
+            i= 4'b1111; #10;
+              
+            s=2'b10;
+            #20;
+            shr_in = 1;
+            #40;
+
+            
+            s=2'b11;
+            #20;
+            reset=1;
+            shl_in = 1;
+            reset = 0;
+            #20;
+            shl_in = 0;
+            #40;
+        end
+
+
+endmodule

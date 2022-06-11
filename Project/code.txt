@@ -1,0 +1,495 @@
+`timescale 1ns / 1ps
+
+
+module debounce(input logic clk, button, output logic debouncedButton);
+
+    logic inputEn;
+    logic [24:0] timer;
+    typedef enum logic [1:0]{S0,S1,S2,S3} statetype;;
+    statetype  state, nextstate;
+    
+    always_ff@(posedge clk)
+        begin    
+            state <= nextstate;
+            if(inputEn)
+                timer <= 25000000;
+            else
+                timer <= timer - 1;
+        end
+    always_comb
+        case(state)
+            S0: if(button) 
+                begin 
+                    nextstate = S1;    
+                    inputEn = 1;
+                end
+                else 
+                    begin 
+                        nextstate = S0; 
+                        inputEn = 0; 
+                    end
+                    
+            S1: begin 
+                    nextstate = S2; inputEn = 0; 
+                end
+            S2: 
+                begin 
+                    nextstate = S3; 
+                    inputEn = 0; 
+                end
+            S3: 
+                begin 
+                    if(timer == 0) 
+                        nextstate = S0; 
+                    else 
+                        nextstate = S3; 
+                        inputEn = 0; 
+                end
+            default: 
+                begin 
+                    nextstate = S0; 
+                    inputEn = 0; 
+                end
+            endcase
+            
+    assign debouncedButton = ( state == S1 );
+endmodule
+
+
+module topmodule (
+    input logic clk,
+    input logic reset,
+    input logic next,
+    input logic isExternal,
+    input logic [11:0] instruct,
+    output logic [6:0]seg,
+    output logic [3:0] ano,
+    output logic [2:0] pc
+);
+
+
+  logic M_re, M_we, RF_we,eq; 
+  logic [3:0] RF_wd ; 
+  logic ALU_src_sel, reg_wr_sel ;
+  logic [2:0]ALU_op, RF_ad1, RF_ad2, RF_wa, constnt;
+  logic [3:0] M_add;
+  
+  logic debouncednext,debouncedexternal;
+  logic [3:0] dig1, dig2,dig4;
+
+debounce nextbutton(clk,next, debouncednext);
+debounce externalbutton(clk,isExternal, debouncedexternal);
+
+  control_unit controller (
+      clk,
+      reset,
+      debouncedexternal,
+      debouncednext,
+      eq,
+      instruct,
+      M_re,
+      M_we,
+      RF_we,
+      ALU_src_sel,
+      reg_wr_sel,
+      M_add,
+      RF_ad1,
+      RF_ad2,
+      RF_wa,
+      ALU_op,
+      constnt,
+      pc
+  );
+
+  data_path datapath (
+      clk,
+      reset,
+      ALU_src_sel,
+      constnt,
+      ALU_op,
+      RF_ad1,
+      RF_ad2,
+      RF_wa,
+      RF_we,
+      reg_wr_sel,
+      M_add,
+      M_we,
+      M_re,
+      dig1,
+      dig2,
+      dig4,
+      eq
+  );
+  
+  seg dis(clk, dig1, dig2 ,dig4, seg,ano);
+
+endmodule
+
+
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company:
+// Engineer:
+//
+// Create Date: 14.12.2021 20:47:54
+// Design Name:
+// Module Name: datapath
+// Project Name:
+// Target Devices:
+// Tool Versions:
+// Description:
+//
+// Dependencies:
+//
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+//
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module data_mem (
+    input logic clk,
+    input logic reset,
+    input logic [3:0] M_add,
+    input logic M_we, M_re, 
+    input logic [3:0] M_wd,
+   output logic [3:0] M_rd
+
+);
+
+    logic [3:0] memory[15:0];
+
+  always_ff @(posedge clk)
+    if (reset)
+        begin
+            for (int i = 0; i < 16; i++)
+                memory[i] <= i;
+        end
+
+        else if (M_we == 1)
+        begin
+            memory[M_add] <= M_wd;
+        end
+
+        else if (M_re == 1)
+        begin
+             M_rd <= memory[M_add];
+        end
+
+
+endmodule
+
+
+module reg_file (
+    input logic clk,
+    input logic reset,
+    input logic [2:0] RF_add1,
+    input logic [2:0] RF_add2,
+    input logic [2:0] RF_wa,
+    input logic RF_we,
+    input logic [3:0] RF_wd,
+    output logic [3:0] RF_d1,
+    output logic [3:0] RF_d2
+);
+
+    logic [2:0] memory[15:0];
+
+  always_ff @(posedge clk)
+    if (reset)
+        begin
+            for (int i = 0; i < 16; i++)
+                memory[i] <= 3'b000;
+        end
+    else if (RF_we == 1)
+        begin
+            memory[RF_wa] <= RF_wd;
+        end
+
+
+    assign RF_d1 = memory[RF_add1];
+    assign RF_d2 = memory[RF_add2];
+
+
+endmodule
+
+
+module aludec(input logic [3:0] RF_d1, ALU_mux_out,
+              input logic [2:0]  ALU_op,
+             output logic eq,
+             output logic [3:0] aluOut,segA,b);
+
+
+
+    always_comb
+    begin
+        case(ALU_op)
+            3'b000:
+            begin
+                aluOut <= 0;
+                segA <= 0;
+                b <= 0;
+                eq <= 0;
+            end
+            3'b001:
+            begin
+                aluOut <= 0;
+                segA <= 0;
+                b <= 0;
+                eq <= 0;
+            end
+            
+            3'b010:
+            begin
+                aluOut <= RF_d1 - ALU_mux_out;
+                segA <= RF_d1;
+                b <= ALU_mux_out;  
+                eq <= 0; 
+            end
+
+            3'b101:
+            begin
+                segA <= RF_d1;
+                aluOut <= RF_d1 + ALU_mux_out;
+                b <= ALU_mux_out;
+                eq <= 0;
+            end
+
+            3'b111:
+            begin
+            if (RF_d1 == ALU_mux_out)
+            begin
+                aluOut <= 1;
+                segA <= RF_d1;
+                b <= ALU_mux_out;
+                eq <= 1;
+            end
+            else
+            begin
+                aluOut <= 0;
+                segA <= RF_d1;
+                b <= ALU_mux_out;
+                eq <= 0;
+                end
+            end
+    endcase
+end
+    
+endmodule
+
+
+
+module data_path(input logic clk,reset, ALU_src_sel,
+                 input logic [2:0] constnt, ALU_op,RF_add1, RF_add2, RF_wa,
+                 input logic RF_we, reg_wr_sel,
+                 input logic [3:0] M_add,
+                 input logic M_we, M_re,
+                 output logic [3:0] segA, segB,aluOut,
+                 output logic eq);
+                 
+    logic [3:0] RF_d1, RF_d2, RF_wd, M_rd, ALU_mux_out;
+
+    reg_file reg_f(clk,reset,RF_add1,RF_add2,RF_wa,RF_we,RF_wd,RF_d1,RF_d2);
+
+    mux21 #(4) alu_mux (RF_d2, {1'b0,constnt}, ALU_src_sel,ALU_mux_out);
+
+    aludec alu(RF_d1,ALU_mux_out,ALU_op,eq,aluOut, segA, segB );
+
+    data_mem datamemory(clk,reset, M_add,M_we, M_re, RF_d2 ,M_rd);
+
+    mux21 #(4) reg_mux (M_rd, aluOut,reg_wr_sel,RF_wd);
+
+
+
+endmodule
+
+
+
+
+
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company:
+// Engineer:
+//
+// Create Date: 11.12.2021 23:33:56
+// Design Name:
+// Module Name: control_unit
+// Project Name:
+// Target Devices:
+// Tool Versions:
+// Description:
+//
+// Dependencies:
+//
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+//
+//////////////////////////////////////////////////////////////////////////////////
+
+module mux21 #(parameter width = 8) (
+    input logic [width-1:0]d1,d2,
+    input logic s,
+    output logic [width-1:0] y
+);
+  assign y = s ? d2: d1;
+endmodule
+
+
+
+module ff #(
+    parameter width = 1
+) (
+    input logic clk,
+    input logic [width-1:0] d,
+    output logic [width-1:0] q
+);
+
+  always_ff @(posedge clk)
+        q <= d;
+
+endmodule
+
+module control (input logic eq,
+                input logic [11:0] IRout,
+                output logic M_re, M_we, RF_we, ALU_src_sel,reg_wr_sel,
+                output logic [3:0] M_add,
+                output logic [2:0] RF_ad1, RF_ad2, RF_wa, ALU_op,constnt,
+                output logic pcSel
+                );
+                
+        always_comb
+        case(IRout[11:9])
+            3'b000:
+            begin   //Load State
+                M_add = IRout[3:0];
+                RF_wa = IRout[6:4];
+                M_re = 1;
+                M_we = 0;
+                RF_we = 1;
+                ALU_src_sel = 0;
+                reg_wr_sel = 0;
+                ALU_op = IRout[11:9];
+                pcSel = 0;
+            end
+
+            3'b001:
+            begin  //Store State
+                M_add = IRout[3:0];
+                RF_ad2 = IRout[6:4];
+                RF_wa = 0;
+                M_re = 0;
+                M_we = 1;
+                RF_we = 0;
+                ALU_src_sel = 0;
+                reg_wr_sel =0;
+                ALU_op = IRout[11:9];
+                pcSel = 0;
+            end
+
+            3'b010:
+            begin  //Sub State
+                ALU_op = IRout[11:9];
+                RF_wa = IRout[8:6];
+                RF_ad1 = IRout[5:3];
+                RF_ad2 = IRout[2:0];
+                M_re = 0;
+                M_we = 0;
+                RF_we = 1;
+                ALU_src_sel = 0;
+                reg_wr_sel = 1;
+                pcSel = 0;
+            end
+
+            3'b101:
+            begin  //Add Constant State
+                ALU_op = IRout[11:9];
+                RF_wa = IRout[8:6];
+                RF_ad1 = IRout[5:3];
+                constnt = IRout[2:0];
+                M_re = 0;
+                M_we = 0;
+                RF_we = 1;
+                ALU_src_sel = 1;
+                reg_wr_sel = 1;
+                pcSel = 0;
+            end
+
+            3'b111:
+            begin  //Jump State
+                RF_ad1 = IRout[5:3];
+                RF_ad2 = IRout[2:0];
+                ALU_op = IRout[11:9];
+                M_re = 0;
+                M_we = 0;
+                RF_we = 0;
+                ALU_src_sel = 0;
+                if (eq)
+                pcSel = 1;
+                else pcSel = 0;
+            end
+
+    endcase
+    
+endmodule
+
+module pcontroller (input logic clk,reset,isExternal,next,pcSel,
+                    input logic [11:0] switchInstruct, instruction,
+                    output logic [11:0] IRin,
+                    output logic [2:0] pc);
+                    
+                    logic [2:0] nextPc ;
+                
+    
+        always_ff @( posedge clk, posedge reset ) begin
+        if (reset)
+            begin
+                pc <= 0;
+                IRin <= 0;
+            end
+         else if (next && (~isExternal))
+           begin
+                IRin <= instruction ;
+                if (pc == 7) pc <= 0; 
+                else pc <= pc + 1;
+            end
+        else if(pcSel)
+            begin
+                pc <= (IRin[8:6] + pc ) ;
+            end
+            else if(isExternal)
+            begin
+                IRin <= switchInstruct;
+            end
+    end
+    
+endmodule
+
+
+module control_unit (
+    input logic clk,
+    input logic reset,
+    input logic isExternal,
+    input logic next,eq,
+    input logic [11:0] switchInstruct,
+    output logic M_re, M_we, RF_we, ALU_src_sel,reg_wr_sel,
+    output logic [3:0] M_add,
+    output logic [2:0] RF_ad1, RF_ad2, RF_wa, ALU_op,constnt, pcled
+);
+
+  logic [11:0] instruction;
+  logic [11:0] IRin;
+  logic [11:0] IRout ;
+  logic pcSel;
+  
+    pcontroller pc(clk,reset,isExternal,next,pcSel,switchInstruct,instruction,IRin, pcled);
+    instruct_mem ROM(clk,pcled,instruction);
+//    ff #(12) IR (clk,IRin,IRout);
+    control controller( eq,IRin,M_re, M_we, RF_we, ALU_src_sel,reg_wr_sel,M_add,RF_ad1, RF_ad2, RF_wa, ALU_op,constnt,pcSel);
+
+
+endmodule
+
+
+
